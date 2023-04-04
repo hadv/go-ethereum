@@ -463,7 +463,7 @@ func makeFullNode(genesis *core.Genesis) (*node.Node, *eth.Ethereum, *ethcatalys
 
 	config := &node.Config{
 		Name:    "geth",
-		Version: params.Version,
+		Version: params.Version(),
 		DataDir: datadir,
 		P2P: p2p.Config{
 			ListenAddr:  "0.0.0.0:0",
@@ -514,7 +514,7 @@ func makeLightNode(genesis *core.Genesis) (*node.Node, *les.LightEthereum, *lesc
 
 	config := &node.Config{
 		Name:    "geth",
-		Version: params.Version,
+		Version: params.Version(),
 		DataDir: datadir,
 		P2P: p2p.Config{
 			ListenAddr:  "0.0.0.0:0",

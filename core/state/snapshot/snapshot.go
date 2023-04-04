@@ -845,7 +845,11 @@ func (t *Tree) generating() (bool, error) {
 	return layer.genMarker != nil, nil
 }
 
-// DiskRoot is a external helper function to return the disk layer root.
+func (t *Tree) Generating() (bool, error) {
+	return t.generating()
+}
+
+// diskRoot is a external helper function to return the disk layer root.
 func (t *Tree) DiskRoot() common.Hash {
 	t.lock.Lock()
 	defer t.lock.Unlock()

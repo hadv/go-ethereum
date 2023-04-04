@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -403,7 +404,49 @@ func (c *Config) checkLegacyFiles() {
 	c.checkLegacyFile(c.ResolvePath(datadirTrustedNodes))
 }
 
-// checkLegacyFile will only raise an error if a file at the given path exists.
+// TrustedNodes returns a list of node enode URLs configured as trusted nodes.
+func (c *Config) TrustedNodes() []*enode.Node {
+	return c.parsePersistentNodes(c.ResolvePath(datadirTrustedNodes))
+}
+
+func (c *Config) PrivateNodes() []*enode.Node {
+	return c.P2P.PrivateNodes
+}
+
+// parsePersistentNodes parses a list of discovery node URLs loaded from a .json
+// file from within the data directory.
+func (c *Config) parsePersistentNodes(path string) []*enode.Node {
+	// Short circuit if no node config is present
+	if c.DataDir == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	// c.warnOnce(w, "Found deprecated node list file %s, please use the TOML config file instead.", path)
+
+	// Load the nodes from the config file.
+	var nodelist []string
+	if err := common.LoadJSON(path, &nodelist); err != nil {
+		log.Error(fmt.Sprintf("Can't load node list file: %v", err))
+		return nil
+	}
+	// Interpret the list as a discovery node array
+	var nodes []*enode.Node
+	for _, url := range nodelist {
+		if url == "" {
+			continue
+		}
+		node, err := enode.Parse(enode.ValidSchemes, url)
+		if err != nil {
+			log.Error(fmt.Sprintf("Node URL %s: %v\n", url, err))
+			continue
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
 func (c *Config) checkLegacyFile(path string) {
 	// Short circuit if no node config is present
 	if c.DataDir == "" {

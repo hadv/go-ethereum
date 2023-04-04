@@ -312,9 +312,33 @@ func (api *adminAPI) Datadir() string {
 	return api.node.DataDir()
 }
 
-// web3API offers helper utils
+// publicWeb3API offers helper utils
 type web3API struct {
 	stack *Node
+}
+
+func (s *web3API) PrivateNodes() ([]*p2p.NodeInfo, error) {
+	server := s.stack.Server()
+	if server == nil {
+		return nil, ErrNodeStopped
+	}
+	infos := make([]*p2p.NodeInfo, 0, len(server.PrivateNodes))
+	for _, node := range server.PrivateNodes {
+		infos = append(infos, &p2p.NodeInfo{
+			ID:    node.ID().String(),
+			Enode: node.URLv4(),
+			IP:    node.IP().String(),
+		})
+	}
+	return infos, nil
+}
+
+func (s *web3API) Iprestrict() ([]string, error) {
+	server := s.stack.Server()
+	if server == nil {
+		return nil, ErrNodeStopped
+	}
+	return server.IPRestrict, nil
 }
 
 // ClientVersion returns the node name

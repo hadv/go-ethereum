@@ -70,10 +70,11 @@ var (
 type Database struct {
 	diskdb ethdb.Database // Persistent storage for matured trie nodes
 
-	cleans  *fastcache.Cache            // GC friendly memory cache of clean node RLPs
-	dirties map[common.Hash]*cachedNode // Data and references relationships of dirty trie nodes
-	oldest  common.Hash                 // Oldest tracked node, flush-list head
-	newest  common.Hash                 // Newest tracked node, flush-list tail
+	greedyGC bool                        // run gc greedy or not
+	cleans   *fastcache.Cache            // GC friendly memory cache of clean node RLPs
+	dirties  map[common.Hash]*cachedNode // Data and references relationships of dirty trie nodes
+	oldest   common.Hash                 // Oldest tracked node, flush-list head
+	newest   common.Hash                 // Newest tracked node, flush-list tail
 
 	gctime  time.Duration      // Time spent on garbage collection since last commit
 	gcnodes uint64             // Nodes garbage collected since last commit
@@ -139,6 +140,8 @@ type cachedNode struct {
 
 	flushPrev common.Hash // Previous node in the flush-list
 	flushNext common.Hash // Next node in the flush-list
+
+	commited bool
 }
 
 // cachedNodeSize is the raw size of a cachedNode data structure without any
@@ -268,6 +271,7 @@ type Config struct {
 	Cache     int    // Memory allowance (MB) to use for caching trie nodes in memory
 	Journal   string // Journal of clean cache to survive node restarts
 	Preimages bool   // Flag whether the preimage of trie key is recorded
+	GreedyGC  bool   // "light" or "greedy" GC
 }
 
 // NewDatabase creates a new trie database to store ephemeral trie content before
@@ -300,6 +304,9 @@ func NewDatabaseWithConfig(diskdb ethdb.Database, config *Config) *Database {
 			children: make(map[common.Hash]uint16),
 		}},
 		preimages: preimage,
+	}
+	if config != nil {
+		db.greedyGC = config.GreedyGC
 	}
 	return db
 }
@@ -476,7 +483,14 @@ func (db *Database) Dereference(root common.Hash) {
 	defer db.lock.Unlock()
 
 	nodes, storage, start := len(db.dirties), db.dirtiesSize, time.Now()
-	db.dereference(root, common.Hash{})
+	batch := db.diskdb.NewBatch()
+	db.dereference(batch, root, common.Hash{})
+
+	// Flush out all accumulated data from the batch to disk
+	if err := batch.Write(); err != nil {
+		log.Warn("Failed to write flush list to disk", "err", err)
+	}
+	batch.Reset()
 
 	db.gcnodes += uint64(nodes - len(db.dirties))
 	db.gcsize += storage - db.dirtiesSize
@@ -491,7 +505,7 @@ func (db *Database) Dereference(root common.Hash) {
 }
 
 // dereference is the private locked version of Dereference.
-func (db *Database) dereference(child common.Hash, parent common.Hash) {
+func (db *Database) dereference(batch ethdb.Batch, child common.Hash, parent common.Hash) {
 	// Dereference the parent-child
 	node := db.dirties[parent]
 
@@ -528,10 +542,21 @@ func (db *Database) dereference(child common.Hash, parent common.Hash) {
 			db.dirties[node.flushPrev].flushNext = node.flushNext
 			db.dirties[node.flushNext].flushPrev = node.flushPrev
 		}
+
+		if batch.ValueSize() >= ethdb.IdealBatchSize {
+			if err := batch.Write(); err != nil {
+				log.Warn("Error on batch flushing out on disk", "err", err)
+			}
+			batch.Reset()
+		}
+
 		// Dereference all children and delete the node
 		node.forChilds(func(hash common.Hash) {
-			db.dereference(hash, child)
+			db.dereference(batch, hash, child)
 		})
+		if db.dirties[child].commited {
+			rawdb.DeleteLegacyTrieNode(batch, child)
+		}
 		delete(db.dirties, child)
 		db.dirtiesSize -= common.StorageSize(common.HashLength + int(node.size))
 		if node.children != nil {
@@ -571,7 +596,9 @@ func (db *Database) Cap(limit common.StorageSize) error {
 	for size > limit && oldest != (common.Hash{}) {
 		// Fetch the oldest referenced node and push into the batch
 		node := db.dirties[oldest]
-		rawdb.WriteLegacyTrieNode(batch, oldest, node.rlp())
+		if !node.commited {
+			rawdb.WriteLegacyTrieNode(batch, oldest, node.rlp())
+		}
 
 		// If we exceeded the ideal batch size, commit and reset
 		if batch.ValueSize() >= ethdb.IdealBatchSize {
@@ -649,7 +676,12 @@ func (db *Database) Commit(node common.Hash, report bool) error {
 	// Move the trie itself into the batch, flushing if enough data is accumulated
 	nodes, storage := len(db.dirties), db.dirtiesSize
 
-	uncacher := &cleaner{db}
+	var uncacher ethdb.KeyValueWriter
+	if db.greedyGC {
+		uncacher = &greedy{db}
+	} else {
+		uncacher = &cleaner{db}
+	}
 	if err := db.commit(node, batch, uncacher); err != nil {
 		log.Error("Failed to commit trie from trie database", "err", err)
 		return err
@@ -687,10 +719,10 @@ func (db *Database) Commit(node common.Hash, report bool) error {
 }
 
 // commit is the private locked version of Commit.
-func (db *Database) commit(hash common.Hash, batch ethdb.Batch, uncacher *cleaner) error {
-	// If the node does not exist, it's a previously committed node
+func (db *Database) commit(hash common.Hash, batch ethdb.Batch, uncacher ethdb.KeyValueWriter) error {
+	// If the node does not exist or marked as committed, then it's a previously committed node
 	node, ok := db.dirties[hash]
-	if !ok {
+	if !ok || node.commited {
 		return nil
 	}
 	var err error
@@ -705,16 +737,13 @@ func (db *Database) commit(hash common.Hash, batch ethdb.Batch, uncacher *cleane
 	// If we've reached an optimal batch size, commit and start over
 	rawdb.WriteLegacyTrieNode(batch, hash, node.rlp())
 	if batch.ValueSize() >= ethdb.IdealBatchSize {
+		db.lock.Lock()
+		batch.Replay(uncacher)
+		db.lock.Unlock()
 		if err := batch.Write(); err != nil {
 			return err
 		}
-		db.lock.Lock()
-		err := batch.Replay(uncacher)
 		batch.Reset()
-		db.lock.Unlock()
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -723,6 +752,28 @@ func (db *Database) commit(hash common.Hash, batch ethdb.Batch, uncacher *cleane
 // and cleans up the trie database from anything written to disk.
 type cleaner struct {
 	db *Database
+}
+
+// evictDirty update the flush-list and remove node from dirty cache
+func evictDirty(db *Database, hash common.Hash, node *cachedNode) {
+	// Node still exists, remove it from the flush-list
+	switch hash {
+	case db.oldest:
+		db.oldest = node.flushNext
+		db.dirties[node.flushNext].flushPrev = common.Hash{}
+	case db.newest:
+		db.newest = node.flushPrev
+		db.dirties[node.flushPrev].flushNext = common.Hash{}
+	default:
+		db.dirties[node.flushPrev].flushNext = node.flushNext
+		db.dirties[node.flushNext].flushPrev = node.flushPrev
+	}
+	// Remove the node from the dirty cache
+	delete(db.dirties, hash)
+	db.dirtiesSize -= common.StorageSize(common.HashLength + int(node.size))
+	if node.children != nil {
+		db.dirtiesSize -= common.StorageSize(cachedNodeChildrenSize + len(node.children)*(common.HashLength+2))
+	}
 }
 
 // Put reacts to database writes and implements dirty data uncaching. This is the
@@ -738,24 +789,7 @@ func (c *cleaner) Put(key []byte, rlp []byte) error {
 	if !ok {
 		return nil
 	}
-	// Node still exists, remove it from the flush-list
-	switch hash {
-	case c.db.oldest:
-		c.db.oldest = node.flushNext
-		c.db.dirties[node.flushNext].flushPrev = common.Hash{}
-	case c.db.newest:
-		c.db.newest = node.flushPrev
-		c.db.dirties[node.flushPrev].flushNext = common.Hash{}
-	default:
-		c.db.dirties[node.flushPrev].flushNext = node.flushNext
-		c.db.dirties[node.flushNext].flushPrev = node.flushPrev
-	}
-	// Remove the node from the dirty cache
-	delete(c.db.dirties, hash)
-	c.db.dirtiesSize -= common.StorageSize(common.HashLength + int(node.size))
-	if node.children != nil {
-		c.db.childrenSize -= common.StorageSize(cachedNodeChildrenSize + len(node.children)*(common.HashLength+2))
-	}
+	evictDirty(c.db, hash, node)
 	// Move the flushed node into the clean cache to prevent insta-reloads
 	if c.db.cleans != nil {
 		c.db.cleans.Set(hash[:], rlp)
@@ -765,6 +799,36 @@ func (c *cleaner) Put(key []byte, rlp []byte) error {
 }
 
 func (c *cleaner) Delete(key []byte) error {
+	panic("not implemented")
+}
+
+type greedy struct {
+	db *Database
+}
+
+func (g *greedy) Put(key []byte, rlp []byte) error {
+	hash := common.BytesToHash(key)
+
+	// If the node does not exist, we're done on this path
+	node, ok := g.db.dirties[hash]
+	if !ok {
+		return nil
+	}
+	// Mark node as commited if node does not existing on db
+	if exist, _ := g.db.diskdb.Has(hash[:]); !exist {
+		g.db.dirties[hash].commited = true
+	} else {
+		evictDirty(g.db, hash, node)
+	}
+	// Move the flushed node into the clean cache to prevent insta-reloads
+	if g.db.cleans != nil {
+		g.db.cleans.Set(hash[:], rlp)
+		memcacheCleanWriteMeter.Mark(int64(len(rlp)))
+	}
+	return nil
+}
+
+func (g *greedy) Delete(key []byte) error {
 	panic("not implemented")
 }
 

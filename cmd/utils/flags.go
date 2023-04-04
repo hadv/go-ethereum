@@ -848,6 +848,14 @@ var (
 		Usage:    "Restricts network communication to the given IP networks (CIDR masks)",
 		Category: flags.NetworkingCategory,
 	}
+	IPrestrictFlag = &cli.StringFlag{
+		Name:  "iprestrict",
+		Usage: "Restricts network communication to the given IP addresses",
+	}
+	PrivateNodeFlag = &cli.StringFlag{
+		Name:  "privatenodes",
+		Usage: "Comma separated enode URLs which must not be advertised as peers to public network",
+	}
 	DNSDiscoveryFlag = &cli.StringFlag{
 		Name:     "discovery.dns",
 		Usage:    "Sets DNS discovery entry points (use \"\" to disable DNS)",
@@ -1414,11 +1422,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 	if !(lightClient || lightServer) {
 		lightPeers = 0
 	}
-	ethPeers := cfg.MaxPeers - lightPeers
-	if lightClient {
-		ethPeers = 0
-	}
-	log.Info("Maximum peer count", "ETH", ethPeers, "LES", lightPeers, "total", cfg.MaxPeers)
+	log.Info("Maximum peer count", "total", cfg.MaxPeers)
 
 	if ctx.IsSet(MaxPendingPeersFlag.Name) {
 		cfg.MaxPendingPeers = ctx.Int(MaxPendingPeersFlag.Name)
@@ -1443,6 +1447,21 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 			Fatalf("Option %q: %v", NetrestrictFlag.Name, err)
 		}
 		cfg.NetRestrict = list
+	}
+
+	var err error
+	if iprestrict := ctx.String(IPrestrictFlag.Name); iprestrict != "" {
+		cfg.IPRestrict, err = netutil.ParseIPs(iprestrict)
+		if err != nil {
+			Fatalf("Option %q: %v", IPrestrictFlag.Name, err)
+		}
+	}
+
+	if privatenodes := ctx.String(PrivateNodeFlag.Name); privatenodes != "" {
+		cfg.PrivateNodes, err = enode.ParseNodes(privatenodes)
+		if err != nil {
+			Fatalf("Option %q: %v", PrivateNodeFlag.Name, err)
+		}
 	}
 
 	if ctx.Bool(DeveloperFlag.Name) {

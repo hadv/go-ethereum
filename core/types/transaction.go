@@ -380,6 +380,10 @@ func (tx *Transaction) Hash() common.Hash {
 	return h
 }
 
+func (tx *Transaction) SetHash(h common.Hash) {
+	tx.hash.Store(h)
+}
+
 // Size returns the true encoded storage size of the transaction, either by encoding
 // and returning it, or returning a previously cached value.
 func (tx *Transaction) Size() uint64 {
@@ -596,4 +600,73 @@ func copyAddressPtr(a *common.Address) *common.Address {
 	}
 	cpy := *a
 	return &cpy
+}
+
+func (t *TransactionsByPriceAndNonce) Copy() *TransactionsByPriceAndNonce {
+	txsCopy := make(map[common.Address]Transactions, len(t.txs))
+	for k, v := range t.txs {
+		txsCopy[k] = v
+	}
+	return &TransactionsByPriceAndNonce{
+		txs:     txsCopy,
+		heads:   append(make(TxByPriceAndTime, 0, t.heads.Len()), t.heads...),
+		signer:  t.signer,
+		baseFee: new(big.Int).Set(t.baseFee),
+	}
+}
+
+// Message is a fully derived transaction and implements core.Message
+//
+// NOTE: In a future PR this will be removed.
+type Message struct {
+	to         *common.Address
+	from       common.Address
+	nonce      uint64
+	amount     *big.Int
+	gasLimit   uint64
+	gasPrice   *big.Int
+	gasFeeCap  *big.Int
+	gasTipCap  *big.Int
+	data       []byte
+	accessList AccessList
+	isFake     bool
+}
+
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *big.Int, gasLimit uint64, gasPrice, gasFeeCap, gasTipCap *big.Int, data []byte, accessList AccessList, isFake bool) Message {
+	return Message{
+		from:       from,
+		to:         to,
+		nonce:      nonce,
+		amount:     amount,
+		gasLimit:   gasLimit,
+		gasPrice:   gasPrice,
+		gasFeeCap:  gasFeeCap,
+		gasTipCap:  gasTipCap,
+		data:       data,
+		accessList: accessList,
+		isFake:     isFake,
+	}
+}
+
+// AsMessage returns the transaction as a core.Message.
+func (tx *Transaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
+	msg := Message{
+		nonce:      tx.Nonce(),
+		gasLimit:   tx.Gas(),
+		gasPrice:   new(big.Int).Set(tx.GasPrice()),
+		gasFeeCap:  new(big.Int).Set(tx.GasFeeCap()),
+		gasTipCap:  new(big.Int).Set(tx.GasTipCap()),
+		to:         tx.To(),
+		amount:     tx.Value(),
+		data:       tx.Data(),
+		accessList: tx.AccessList(),
+		isFake:     false,
+	}
+	// If baseFee provided, set gasPrice to effectiveGasPrice.
+	if baseFee != nil {
+		msg.gasPrice = math.BigMin(msg.gasPrice.Add(msg.gasTipCap, baseFee), msg.gasFeeCap)
+	}
+	var err error
+	msg.from, err = Sender(s, tx)
+	return msg, err
 }

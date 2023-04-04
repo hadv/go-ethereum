@@ -37,6 +37,7 @@ var (
 
 type serviceRegistry struct {
 	mu       sync.Mutex
+	callWG   sync.WaitGroup
 	services map[string]service
 }
 
