@@ -90,15 +90,14 @@ func main() {
 		enodes = append(enodes, stack.Server().Self())
 
 		// Inject the signer key and start sealing with it
-		ks := keystore.NewKeyStore(stack.KeyStoreDir(), keystore.LightScryptN, keystore.LightScryptP)
-		signer, err := ks.ImportECDSA(sealer, "")
+		store := stack.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
+		signer, err := store.ImportECDSA(sealer, "")
 		if err != nil {
 			panic(err)
 		}
-		if err := ks.Unlock(signer, ""); err != nil {
+		if err := store.Unlock(signer, ""); err != nil {
 			panic(err)
 		}
-		stack.AccountManager().AddBackend(ks)
 	}
 
 	// Iterate over all the nodes and start signing on them
