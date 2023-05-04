@@ -524,7 +524,7 @@ func (s *StateDB) updateStateObject(obj *stateObject) {
 	// update mechanism is not symmetric to the deletion, because whereas it is
 	// enough to track account updates at commit time, deletions need tracking
 	// at transaction boundary level to ensure we capture state clearing.
-	if s.snap != nil {
+	if s.snap != nil && obj.address.Hex() != "0x0000000000000000000000000000000000000000" {
 		log.Info("updateStateObject", "addr", obj.address, "balance", obj.data.Balance, "nonce", obj.data.Nonce, "root", obj.data.Root, "code", obj.data.CodeHash)
 		s.snapAccounts[obj.addrHash] = snapshot.SlimAccountRLP(obj.data.Nonce, obj.data.Balance, obj.data.Root, obj.data.CodeHash)
 	}
