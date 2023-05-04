@@ -525,6 +525,7 @@ func (s *StateDB) updateStateObject(obj *stateObject) {
 	// enough to track account updates at commit time, deletions need tracking
 	// at transaction boundary level to ensure we capture state clearing.
 	if s.snap != nil {
+		log.Info("updateStateObject", "addr", obj.address, "balance", obj.data.Balance, "nonce", obj.data.Nonce, "root", obj.data.Root, "code", obj.data.CodeHash)
 		s.snapAccounts[obj.addrHash] = snapshot.SlimAccountRLP(obj.data.Nonce, obj.data.Balance, obj.data.Root, obj.data.CodeHash)
 	}
 }
