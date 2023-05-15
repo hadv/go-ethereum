@@ -567,6 +567,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	if s.snap != nil {
 		start := time.Now()
 		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
+		log.Warn("getDeletedStateObject", "address", addr, "balance", acc.Balance, "code", acc.CodeHash, "nonce", acc.Nonce)
 		if metrics.EnabledExpensive {
 			s.SnapshotAccountReads += time.Since(start)
 		}
