@@ -560,6 +560,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	// Prefer live objects if any is available
 	if obj := s.stateObjects[addr]; obj != nil {
+		log.Warn("stateObjects", "address", obj.Address(), "balance", obj.Balance(), "code", obj.CodeHash(), "nonce", obj.Nonce())
 		return obj
 	}
 	// If no live objects are available, attempt to use snapshots
@@ -567,6 +568,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	if s.snap != nil {
 		start := time.Now()
 		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
+		log.Warn("getDeletedStateObject", "address", addr, "balance", acc.Balance, "code", acc.CodeHash, "nonce", acc.Nonce)
 		if metrics.EnabledExpensive {
 			s.SnapshotAccountReads += time.Since(start)
 		}
