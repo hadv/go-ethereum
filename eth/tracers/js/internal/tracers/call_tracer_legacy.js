@@ -1,4 +1,8 @@
+<<<<<<< HEAD:eth/tracers/js/internal/tracers/call_tracer_legacy.js
+// Copyright 2021 The go-ethereum Authors
+=======
 // Copyright 2017 The go-ethereum Authors
+>>>>>>> develop-1.10.8:eth/tracers/internal/tracers/call_tracer_legacy.js
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -14,6 +18,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+<<<<<<< HEAD:eth/tracers/js/internal/tracers/call_tracer_legacy.js
+
+// callFrameTracer uses the new call frame tracing methods to report useful information
+// about internal messages of a transaction.
+{
+	callstack: [{}],
+	fault: function(log, db) {},
+	result: function(ctx, db) {
+		// Prepare outer message info
+=======
 // callTracer is a full blown transaction tracer that extracts and reports all
 // the internal calls made by a transaction, along with any useful information.
 {
@@ -195,6 +209,7 @@
 	// result is invoked when all the opcodes have been iterated over and returns
 	// the final result of the tracing.
 	result: function(ctx, db) {
+>>>>>>> develop-1.10.8:eth/tracers/internal/tracers/call_tracer_legacy.js
 		var result = {
 			type:    ctx.type,
 			from:    toHex(ctx.from),
@@ -204,6 +219,62 @@
 			gasUsed: '0x' + bigInt(ctx.gasUsed).toString(16),
 			input:   toHex(ctx.input),
 			output:  toHex(ctx.output),
+<<<<<<< HEAD:eth/tracers/js/internal/tracers/call_tracer_legacy.js
+<<<<<<<< HEAD:eth/tracers/js/internal/tracers/call_tracer_legacy.js
+		};
+========
+		}
+>>>>>>>> develop-1.10.8:eth/tracers/internal/tracers/call_tracer.js
+		if (this.callstack[0].calls !== undefined) {
+			result.calls = this.callstack[0].calls
+		}
+		if (this.callstack[0].error !== undefined) {
+			result.error = this.callstack[0].error
+		} else if (ctx.error !== undefined) {
+			result.error = ctx.error
+		}
+		if (result.error !== undefined && (result.error !== "execution reverted" || result.output ==="0x")) {
+			delete result.output
+		}
+
+		return this.finalize(result)
+	},
+	enter: function(frame) {
+		var call = {
+			type: frame.getType(),
+			from: toHex(frame.getFrom()),
+			to: toHex(frame.getTo()),
+			input: toHex(frame.getInput()),
+			gas: '0x' + bigInt(frame.getGas()).toString('16'),
+		}
+		if (frame.getValue() !== undefined){
+			call.value='0x' + bigInt(frame.getValue()).toString(16)
+		}
+		this.callstack.push(call)
+	},
+	exit: function(frameResult) {
+		var len = this.callstack.length
+		if (len > 1) {
+			var call = this.callstack.pop()
+			call.gasUsed = '0x' + bigInt(frameResult.getGasUsed()).toString('16')
+			var error = frameResult.getError()
+			if (error === undefined) {
+				call.output = toHex(frameResult.getOutput())
+			} else {
+				call.error = error
+				if (call.type === 'CREATE' || call.type === 'CREATE2') {
+					delete call.to
+				}
+			}
+			len -= 1
+			if (this.callstack[len-1].calls === undefined) {
+				this.callstack[len-1].calls = []
+			}
+			this.callstack[len-1].calls.push(call)
+		}
+	},
+=======
+			time:    ctx.time,
 		};
 		if (this.callstack[0].calls !== undefined) {
 			result.calls = this.callstack[0].calls;
@@ -219,6 +290,7 @@
 		return this.finalize(result);
 	},
 
+>>>>>>> develop-1.10.8:eth/tracers/internal/tracers/call_tracer_legacy.js
 	// finalize recreates a call object using the final desired field oder for json
 	// serialization. This is a nicety feature to pass meaningfully ordered results
 	// to users who don't interpret it, just display it.
@@ -233,18 +305,33 @@
 			input:   call.input,
 			output:  call.output,
 			error:   call.error,
+<<<<<<< HEAD:eth/tracers/js/internal/tracers/call_tracer_legacy.js
+=======
+			time:    call.time,
+>>>>>>> develop-1.10.8:eth/tracers/internal/tracers/call_tracer_legacy.js
 			calls:   call.calls,
 		}
 		for (var key in sorted) {
 			if (sorted[key] === undefined) {
+<<<<<<< HEAD:eth/tracers/js/internal/tracers/call_tracer_legacy.js
+				delete sorted[key]
+=======
 				delete sorted[key];
+>>>>>>> develop-1.10.8:eth/tracers/internal/tracers/call_tracer_legacy.js
 			}
 		}
 		if (sorted.calls !== undefined) {
 			for (var i=0; i<sorted.calls.length; i++) {
+<<<<<<< HEAD:eth/tracers/js/internal/tracers/call_tracer_legacy.js
+				sorted.calls[i] = this.finalize(sorted.calls[i])
+			}
+		}
+		return sorted
+=======
 				sorted.calls[i] = this.finalize(sorted.calls[i]);
 			}
 		}
 		return sorted;
+>>>>>>> develop-1.10.8:eth/tracers/internal/tracers/call_tracer_legacy.js
 	}
 }

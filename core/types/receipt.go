@@ -333,7 +333,7 @@ func (rs Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, nu
 		rs[i].TransactionIndex = uint(i)
 
 		// The contract address can be derived from the transaction itself
-		if txs[i].To() == nil {
+		if signer != nil && txs[i].To() == nil {
 			// Deriving the signer is expensive, only do if it's actually needed
 			from, _ := Sender(signer, txs[i])
 			rs[i].ContractAddress = crypto.CreateAddress(from, txs[i].Nonce())

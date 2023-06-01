@@ -380,6 +380,10 @@ func (tx *Transaction) Hash() common.Hash {
 	return h
 }
 
+func (tx *Transaction) SetHash(h common.Hash) {
+	tx.hash.Store(h)
+}
+
 // Size returns the true encoded storage size of the transaction, either by encoding
 // and returning it, or returning a previously cached value.
 func (tx *Transaction) Size() uint64 {
@@ -596,4 +600,17 @@ func copyAddressPtr(a *common.Address) *common.Address {
 	}
 	cpy := *a
 	return &cpy
+}
+
+func (t *TransactionsByPriceAndNonce) Copy() *TransactionsByPriceAndNonce {
+	txsCopy := make(map[common.Address]Transactions, len(t.txs))
+	for k, v := range t.txs {
+		txsCopy[k] = v
+	}
+	return &TransactionsByPriceAndNonce{
+		txs:     txsCopy,
+		heads:   append(make(TxByPriceAndTime, 0, t.heads.Len()), t.heads...),
+		signer:  t.signer,
+		baseFee: new(big.Int).Set(t.baseFee),
+	}
 }

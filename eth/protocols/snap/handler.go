@@ -23,6 +23,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/light"
 	"github.com/ethereum/go-ethereum/log"
@@ -59,6 +61,16 @@ const (
 // Handler is a callback to invoke from an outside runner after the boilerplate
 // exchanges have passed.
 type Handler func(peer *Peer) error
+
+type BlockChain interface {
+	// StateCache returns the caching database underpinning the blockchain instance.
+	StateCache() state.Database
+	// ContractCode retrieves a blob of data associated with a contract hash
+	// either from ephemeral in-memory cache, or from persistent storage.
+	ContractCode(hash common.Hash) ([]byte, error)
+	// Snapshots returns the blockchain snapshot tree.
+	Snapshots() *snapshot.Tree
+}
 
 // Backend defines the data retrieval methods to serve remote requests and the
 // callback methods to invoke on remote deliveries.
@@ -572,6 +584,6 @@ func ServiceGetTrieNodesQuery(chain *core.BlockChain, req *GetTrieNodesPacket, s
 type NodeInfo struct{}
 
 // nodeInfo retrieves some `snap` protocol metadata about the running host node.
-func nodeInfo(chain *core.BlockChain) *NodeInfo {
+func nodeInfo(BlockChain) *NodeInfo {
 	return &NodeInfo{}
 }

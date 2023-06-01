@@ -40,8 +40,8 @@ const (
 	dialHistoryExpiration = inboundThrottleTime + 5*time.Second
 
 	// Config for the "Looking for peers" message.
-	dialStatsLogInterval = 10 * time.Second // printed at most this often
-	dialStatsPeerLimit   = 3                // but not if more than this many dialed peers
+	dialStatsLogInterval = 120 * time.Second // printed at most this often
+	dialStatsPeerLimit   = 2                 // but not if more than this many dialed peers
 
 	// Endpoint resolution is throttled with bounded backoff.
 	initialResolveDelay = 60 * time.Second
@@ -76,8 +76,10 @@ var (
 	errSelf             = errors.New("is self")
 	errAlreadyDialing   = errors.New("already dialing")
 	errAlreadyConnected = errors.New("already connected")
+	errAlreadyListened  = errors.New("already listened")
 	errRecentlyDialed   = errors.New("recently dialed")
 	errNetRestrict      = errors.New("not contained in netrestrict list")
+	errIPRestrict       = errors.New("not contained in iprestrict list")
 	errNoPort           = errors.New("node does not provide TCP port")
 )
 
@@ -132,6 +134,7 @@ type dialConfig struct {
 	maxDialPeers   int              // maximum number of dialed peers
 	maxActiveDials int              // maximum number of active dials
 	netRestrict    *netutil.Netlist // IP netrestrict list, disabled if nil
+	ipRestrict     []string         // IP address restrict list, disabled if nil
 	resolver       nodeResolver
 	dialer         NodeDialer
 	log            log.Logger
@@ -389,6 +392,9 @@ func (d *dialScheduler) checkDial(n *enode.Node) error {
 	}
 	if d.netRestrict != nil && !d.netRestrict.Contains(n.IP()) {
 		return errNetRestrict
+	}
+	if len(d.ipRestrict) > 0 && !contains(d.ipRestrict, n.IP().String()) {
+		return errIPRestrict
 	}
 	if d.history.contains(string(n.ID().Bytes())) {
 		return errRecentlyDialed

@@ -135,6 +135,7 @@ type Message struct {
 	GasTipCap  *big.Int
 	Data       []byte
 	AccessList types.AccessList
+	IsFake     bool
 
 	// When SkipAccountCheckss is true, the message nonce is not checked against the
 	// account nonce in state. It also disables checking that the sender is an EOA.
@@ -154,6 +155,7 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 		Value:             tx.Value(),
 		Data:              tx.Data(),
 		AccessList:        tx.AccessList(),
+		IsFake:            false,
 		SkipAccountChecks: false,
 	}
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
@@ -163,6 +165,23 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 	var err error
 	msg.From, err = types.Sender(s, tx)
 	return msg, err
+}
+
+func NewMessage(from common.Address, to *common.Address, nonce uint64, value *big.Int, gasLimit uint64, gasPrice, gasFeeCap, gasTipCap *big.Int, data []byte, accessList types.AccessList, isFake bool) *Message {
+	return &Message{
+		From:              from,
+		To:                to,
+		Nonce:             nonce,
+		Value:             value,
+		GasLimit:          gasLimit,
+		GasPrice:          gasPrice,
+		GasFeeCap:         gasFeeCap,
+		GasTipCap:         gasTipCap,
+		Data:              data,
+		AccessList:        accessList,
+		IsFake:            isFake,
+		SkipAccountChecks: false,
+	}
 }
 
 // ApplyMessage computes the new state by applying the given message
