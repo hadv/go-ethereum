@@ -393,6 +393,7 @@ outer:
 func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error) {
 	p.wg.Add(len(p.running))
 	for _, proto := range p.running {
+		p.log.Info("Protocol", "proto", proto.Name, "version", proto.Version)
 		proto := proto
 		proto.closed = p.closed
 		proto.wstart = writeStart
@@ -403,8 +404,13 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 		}
 		p.log.Trace(fmt.Sprintf("Starting protocol %s/%d", proto.Name, proto.Version))
 		go func() {
+			p.log.Debug("proto.Run(p, rw) Before")
 			defer p.wg.Done()
 			err := proto.Run(p, rw)
+			p.log.Debug("proto.Run(p, rw) After")
+			if err != nil {
+				p.log.Error("proto.Run(p, rw) Error: ", "err", err.Error())
+			}
 			if err == nil {
 				p.log.Trace(fmt.Sprintf("Protocol %s/%d returned", proto.Name, proto.Version))
 				err = errProtocolReturned
