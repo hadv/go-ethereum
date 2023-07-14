@@ -1079,6 +1079,9 @@ func (srv *Server) runPeer(p *Peer) {
 
 	// Run the per-peer main loop.
 	remoteRequested, err := p.run()
+	if err != nil {
+		srv.log.Error("the per-peer main loop.", "err", err.Error())
+	}
 
 	// Announce disconnect on the main loop to update the peer set.
 	// The main loop waits for existing peers to be sent on srv.delpeer
