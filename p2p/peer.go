@@ -257,11 +257,16 @@ loop:
 			// A write finished. Allow the next write to start if
 			// there was no error.
 			if err != nil {
+				println("writeErr: " + err.Error())
 				reason = DiscNetworkError
 				break loop
 			}
 			writeStart <- struct{}{}
 		case err = <-readErr:
+			if err != nil {
+				println("readErr: " + err.Error())
+				p.log.Error("readErr", "err", err.Error())
+			}
 			if r, ok := err.(DiscReason); ok {
 				remoteRequested = true
 				reason = r
@@ -270,9 +275,16 @@ loop:
 			}
 			break loop
 		case err = <-p.protoErr:
+			if err != nil {
+				println("protoErr: " + err.Error())
+				p.log.Error("protoErr", "err", err.Error())
+			}
 			reason = discReasonForError(err)
 			break loop
 		case err = <-p.disc:
+			if err != nil {
+				println("disc: " + err.Error())
+			}
 			reason = discReasonForError(err)
 			break loop
 		}
@@ -297,6 +309,7 @@ func (p *Peer) pingLoop() {
 			}
 			ping.Reset(pingInterval)
 		case <-p.closed:
+			p.log.Warn("p.closed")
 			return
 		}
 	}
@@ -393,6 +406,7 @@ outer:
 func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error) {
 	p.wg.Add(len(p.running))
 	for _, proto := range p.running {
+		p.log.Info("Protocol", "proto", proto.Name, "version", proto.Version)
 		proto := proto
 		proto.closed = p.closed
 		proto.wstart = writeStart
@@ -403,8 +417,14 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 		}
 		p.log.Trace(fmt.Sprintf("Starting protocol %s/%d", proto.Name, proto.Version))
 		go func() {
+			p.log.Debug("proto.Run(p, rw) Before")
 			defer p.wg.Done()
+			p.log.Debug("proto.Run(p, rw) Done")
 			err := proto.Run(p, rw)
+			p.log.Debug("proto.Run(p, rw) After")
+			if err != nil {
+				p.log.Error("proto.Run(p, rw) Error: ", "err", err.Error())
+			}
 			if err == nil {
 				p.log.Trace(fmt.Sprintf("Protocol %s/%d returned", proto.Name, proto.Version))
 				err = errProtocolReturned
