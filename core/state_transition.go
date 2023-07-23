@@ -65,7 +65,7 @@ func (result *ExecutionResult) Revert() []byte {
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028 bool, isEIP3860 bool) (uint64, error) {
+func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028 bool) (uint64, error) {
 	// Set the starting gas for the raw transaction
 	var gas uint64
 	if isContractCreation && isHomestead {
@@ -73,9 +73,8 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 	} else {
 		gas = params.TxGas
 	}
-	dataLen := uint64(len(data))
 	// Bump the required gas by the amount of transactional data
-	if dataLen > 0 {
+	if len(data) > 0 {
 		// Zero and non-zero bytes are priced differently
 		var nz uint64
 		for _, byt := range data {
@@ -93,19 +92,11 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 		}
 		gas += nz * nonZeroGas
 
-		z := dataLen - nz
+		z := uint64(len(data)) - nz
 		if (math.MaxUint64-gas)/params.TxDataZeroGas < z {
 			return 0, ErrGasUintOverflow
 		}
 		gas += z * params.TxDataZeroGas
-
-		if isContractCreation && isEIP3860 {
-			lenWords := toWordSize(dataLen)
-			if (math.MaxUint64-gas)/params.InitCodeWordGas < lenWords {
-				return 0, ErrGasUintOverflow
-			}
-			gas += lenWords * params.InitCodeWordGas
-		}
 	}
 	if accessList != nil {
 		gas += uint64(len(accessList)) * params.TxAccessListAddressGas
@@ -352,12 +343,15 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	var (
 		msg              = st.msg
 		sender           = vm.AccountRef(msg.From())
-		rules            = st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
 		contractCreation = msg.To() == nil
 	)
 
+	homestead := st.evm.ChainConfig().IsHomestead(st.evm.Context.BlockNumber)
+	istanbul := st.evm.ChainConfig().IsIstanbul(st.evm.Context.BlockNumber)
+	london := st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber)
+
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(msg.Data(), msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
+	gas, err := IntrinsicGas(msg.Data(), msg.AccessList(), contractCreation, homestead, istanbul)
 	if err != nil {
 		return nil, err
 	}
@@ -371,15 +365,10 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		return nil, fmt.Errorf("%w: address %v", ErrInsufficientFundsForTransfer, msg.From().Hex())
 	}
 
-	// Check whether the init code size has been exceeded.
-	if rules.IsShanghai && contractCreation && len(msg.Data()) > params.MaxInitCodeSize {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(msg.Data()), params.MaxInitCodeSize)
+	// Set up the initial access list.
+	if rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time); rules.IsBerlin {
+		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
 	}
-
-	// Execute the preparatory steps for state transition which includes:
-	// - prepare accessList(post-berlin)
-	// - reset transient storage(eip 1153)
-	st.state.Prepare(rules, msg.From(), st.evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
 
 	var (
 		ret   []byte
@@ -393,7 +382,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), msg.Data(), st.gas, msg.Value())
 	}
 
-	if !rules.IsLondon {
+	if !london {
 		// Before EIP-3529: refunds were capped to gasUsed / 2
 		st.refundGas(params.RefundQuotient)
 	} else {
@@ -401,19 +390,10 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		st.refundGas(params.RefundQuotientEIP3529)
 	}
 	effectiveTip := st.gasPrice
-	if rules.IsLondon {
+	if london {
 		effectiveTip = cmath.BigMin(st.gasTipCap, new(big.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
 	}
-
-	if st.evm.Config.NoBaseFee && msg.GasFeeCap().Sign() == 0 && msg.GasTipCap().Sign() == 0 {
-		// Skip fee payment when NoBaseFee is set and the fee fields
-		// are 0. This avoids a negative effectiveTip being applied to
-		// the coinbase when simulating calls.
-	} else {
-		fee := new(big.Int).SetUint64(st.gasUsed())
-		fee.Mul(fee, effectiveTip)
-		st.state.AddBalance(st.evm.Context.Coinbase, fee)
-	}
+	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),

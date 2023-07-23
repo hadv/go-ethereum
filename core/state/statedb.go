@@ -31,7 +31,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 )
@@ -1088,45 +1087,30 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 	return root, nil
 }
 
-// Prepare handles the preparatory steps for executing a state transition with.
-// This method must be invoked before state transition.
+// PrepareAccessList handles the preparatory steps for executing a state transition with
+// regards to both EIP-2929 and EIP-2930:
 //
-// Berlin fork:
 // - Add sender to access list (2929)
 // - Add destination to access list (2929)
 // - Add precompiles to access list (2929)
 // - Add the contents of the optional tx access list (2930)
 //
-// Potential EIPs:
-// - Reset access list (Berlin)
-// - Add coinbase to access list (EIP-3651)
-// - Reset transient storage (EIP-1153)
-func (s *StateDB) Prepare(rules params.Rules, sender, coinbase common.Address, dst *common.Address, precompiles []common.Address, list types.AccessList) {
-	if rules.IsBerlin {
-		// Clear out any leftover from previous executions
-		al := newAccessList()
-		s.accessList = al
-
-		al.AddAddress(sender)
-		if dst != nil {
-			al.AddAddress(*dst)
-			// If it's a create-tx, the destination will be added inside evm.create
-		}
-		for _, addr := range precompiles {
-			al.AddAddress(addr)
-		}
-		for _, el := range list {
-			al.AddAddress(el.Address)
-			for _, key := range el.StorageKeys {
-				al.AddSlot(el.Address, key)
-			}
-		}
-		if rules.IsShanghai { // EIP-3651: warm coinbase
-			al.AddAddress(coinbase)
+// This method should only be called if Berlin/2929+2930 is applicable at the current number.
+func (s *StateDB) PrepareAccessList(sender common.Address, dst *common.Address, precompiles []common.Address, list types.AccessList) {
+	s.AddAddressToAccessList(sender)
+	if dst != nil {
+		s.AddAddressToAccessList(*dst)
+		// If it's a create-tx, the destination will be added inside evm.create
+	}
+	for _, addr := range precompiles {
+		s.AddAddressToAccessList(addr)
+	}
+	for _, el := range list {
+		s.AddAddressToAccessList(el.Address)
+		for _, key := range el.StorageKeys {
+			s.AddSlotToAccessList(el.Address, key)
 		}
 	}
-	// Reset transient storage at the beginning of transaction execution
-	s.transientStorage = newTransientStorage()
 }
 
 // AddAddressToAccessList adds the given address to the access list
