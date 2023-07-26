@@ -1648,7 +1648,6 @@ func (s *TransactionAPI) GetTransactionReceipt(ctx context.Context, hash common.
 		"logs":              receipt.Logs,
 		"logsBloom":         receipt.Bloom,
 		"type":              hexutil.Uint(tx.Type()),
-		"effectiveGasPrice": (*hexutil.Big)(receipt.EffectiveGasPrice),
 	}
 
 	// Assign receipt status or post state.
