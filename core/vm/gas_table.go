@@ -21,7 +21,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -50,10 +49,9 @@ func memoryGasCost(mem *Memory, newMemSize uint64) (uint64, error) {
 
 		fee := newTotalFee - mem.lastGasCost
 		mem.lastGasCost = newTotalFee
-		log.Info("Gas for memory expansion", "gas", fee)
+
 		return fee, nil
 	}
-	log.Info("Gas for memory expansion", "gas", uint64(0))
 	return 0, nil
 }
 
@@ -84,7 +82,6 @@ func memoryCopierGas(stackpos int) gasFunc {
 		if gas, overflow = math.SafeAdd(gas, words); overflow {
 			return 0, ErrGasUintOverflow
 		}
-		log.Info("Gas for memory copy", "gas", gas)
 		return gas, nil
 	}
 }
@@ -112,14 +109,11 @@ func gasSStore(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySi
 		// 3. From a non-zero to a non-zero                         (CHANGE)
 		switch {
 		case current == (common.Hash{}) && y.Sign() != 0: // 0 => non 0
-			log.Info("Gas for SSTORE", "gas", params.SstoreSetGas)
 			return params.SstoreSetGas, nil
 		case current != (common.Hash{}) && y.Sign() == 0: // non 0 => 0
 			evm.StateDB.AddRefund(params.SstoreRefundGas)
-			log.Info("Gas for SSTORE", "gas", params.SstoreClearGas)
 			return params.SstoreClearGas, nil
 		default: // non 0 => non 0 (or 0 => 0)
-			log.Info("Gas for SSTORE", "gas", params.SstoreResetGas)
 			return params.SstoreResetGas, nil
 		}
 	}
@@ -140,19 +134,16 @@ func gasSStore(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySi
 	//			(2.2.2.2.) Otherwise, add 4800 gas to refund counter.
 	value := common.Hash(y.Bytes32())
 	if current == value { // noop (1)
-		log.Info("Gas for SSTORE", "gas", params.NetSstoreNoopGas)
 		return params.NetSstoreNoopGas, nil
 	}
 	original := evm.StateDB.GetCommittedState(contract.Address(), x.Bytes32())
 	if original == current {
 		if original == (common.Hash{}) { // create slot (2.1.1)
-			log.Info("Gas for SSTORE", "gas", params.NetSstoreInitGas)
 			return params.NetSstoreInitGas, nil
 		}
 		if value == (common.Hash{}) { // delete slot (2.1.2b)
 			evm.StateDB.AddRefund(params.NetSstoreClearRefund)
 		}
-		log.Info("Gas for SSTORE", "gas", params.NetSstoreCleanGas)
 		return params.NetSstoreCleanGas, nil // write existing slot (2.1.2)
 	}
 	if original != (common.Hash{}) {
@@ -169,7 +160,6 @@ func gasSStore(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySi
 			evm.StateDB.AddRefund(params.NetSstoreResetRefund)
 		}
 	}
-	log.Info("Gas for SSTORE", "gas", params.NetSstoreDirtyGas)
 	return params.NetSstoreDirtyGas, nil
 }
 
@@ -201,19 +191,16 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 	value := common.Hash(y.Bytes32())
 
 	if current == value { // noop (1)
-		log.Info("Gas for SSTORE", "gas", params.SloadGasEIP2200)
 		return params.SloadGasEIP2200, nil
 	}
 	original := evm.StateDB.GetCommittedState(contract.Address(), x.Bytes32())
 	if original == current {
 		if original == (common.Hash{}) { // create slot (2.1.1)
-			log.Info("Gas for SSTORE", "gas", params.SstoreSetGasEIP2200)
 			return params.SstoreSetGasEIP2200, nil
 		}
 		if value == (common.Hash{}) { // delete slot (2.1.2b)
 			evm.StateDB.AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}
-		log.Info("Gas for SSTORE", "gas", params.SstoreResetGasEIP2200)
 		return params.SstoreResetGasEIP2200, nil // write existing slot (2.1.2)
 	}
 	if original != (common.Hash{}) {
@@ -230,7 +217,6 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 			evm.StateDB.AddRefund(params.SstoreResetGasEIP2200 - params.SloadGasEIP2200)
 		}
 	}
-	log.Info("Gas for SSTORE", "gas", params.SloadGasEIP2200)
 	return params.SloadGasEIP2200, nil // dirty update (2.2)
 }
 
@@ -260,7 +246,6 @@ func makeGasLog(n uint64) gasFunc {
 		if gas, overflow = math.SafeAdd(gas, memorySizeGas); overflow {
 			return 0, ErrGasUintOverflow
 		}
-		log.Info("Gas for LOG", "gas", gas)
 		return gas, nil
 	}
 }
@@ -280,7 +265,6 @@ func gasKeccak256(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memor
 	if gas, overflow = math.SafeAdd(gas, wordGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for KECCAK256", "gas", gas)
 	return gas, nil
 }
 
@@ -315,7 +299,6 @@ func gasCreate2(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memoryS
 	if gas, overflow = math.SafeAdd(gas, wordGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for CREATE2", "gas", gas)
 	return gas, nil
 }
 
@@ -333,7 +316,6 @@ func gasCreateEip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, m
 	if gas, overflow = math.SafeAdd(gas, moreGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for CREATE", "gas", gas)
 	return gas, nil
 }
 func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
@@ -350,7 +332,6 @@ func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *Stack, mem *Memory, 
 	if gas, overflow = math.SafeAdd(gas, moreGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for CREATE2", "gas", gas)
 	return gas, nil
 }
 
@@ -364,7 +345,6 @@ func gasExpFrontier(evm *EVM, contract *Contract, stack *Stack, mem *Memory, mem
 	if gas, overflow = math.SafeAdd(gas, params.ExpGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for EXP", "gas", gas)
 	return gas, nil
 }
 
@@ -378,7 +358,6 @@ func gasExpEIP158(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memor
 	if gas, overflow = math.SafeAdd(gas, params.ExpGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for EXP", "gas", gas)
 	return gas, nil
 }
 
@@ -414,7 +393,6 @@ func gasCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for CALL", "gas", gas)
 	return gas, nil
 }
 
@@ -440,7 +418,6 @@ func gasCallCode(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memory
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for CALLCODE", "gas", gas)
 	return gas, nil
 }
 
@@ -457,7 +434,6 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for DELEGATECALL", "gas", gas)
 	return gas, nil
 }
 
@@ -474,7 +450,6 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memo
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	log.Info("Gas for STATICCALL", "gas", gas)
 	return gas, nil
 }
 
@@ -498,6 +473,5 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 	if !evm.StateDB.HasSuicided(contract.Address()) {
 		evm.StateDB.AddRefund(params.SelfdestructRefundGas)
 	}
-	log.Info("Gas for SELFDESTRUCT", "gas", gas)
 	return gas, nil
 }
