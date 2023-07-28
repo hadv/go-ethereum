@@ -108,10 +108,8 @@ func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 		// If the caller cannot afford the cost, this change will be rolled back
 		// If he does afford it, we can skip checking the same thing later on, during execution
 		evm.StateDB.AddSlotToAccessList(contract.Address(), slot)
-		log.Info("cold sload", "cost", params.ColdSloadCostEIP2929)
 		return params.ColdSloadCostEIP2929, nil
 	}
-	log.Info("warm sload", "cost", params.WarmStorageReadCostEIP2929)
 	return params.WarmStorageReadCostEIP2929, nil
 }
 
@@ -135,10 +133,8 @@ func gasExtCodeCopyEIP2929(evm *EVM, contract *Contract, stack *Stack, mem *Memo
 		if gas, overflow = math.SafeAdd(gas, params.ColdAccountAccessCostEIP2929-params.WarmStorageReadCostEIP2929); overflow {
 			return 0, ErrGasUintOverflow
 		}
-		log.Info("cold extcodecopy", "cost", gas)
 		return gas, nil
 	}
-	log.Info("warm extcodecopy", "cost", gas)
 	return gas, nil
 }
 
@@ -156,10 +152,8 @@ func gasEip2929AccountCheck(evm *EVM, contract *Contract, stack *Stack, mem *Mem
 		// If the caller cannot afford the cost, this change will be rolled back
 		evm.StateDB.AddAddressToAccessList(addr)
 		// The warm storage read cost is already charged as constantGas
-		log.Info("cold account check", "cost", params.ColdAccountAccessCostEIP2929-params.WarmStorageReadCostEIP2929)
 		return params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929, nil
 	}
-	log.Info("warm account check", "cost", 0)
 	return 0, nil
 }
 
@@ -193,7 +187,6 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		// outside of this function, as part of the dynamic gas, and that will make it
 		// also become correctly reported to tracers.
 		contract.Gas += coldCost
-		log.Info("cold call", "cost", gas+coldCost)
 		return gas + coldCost, nil
 	}
 }
@@ -245,7 +238,6 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		if refundsEnabled && !evm.StateDB.HasSuicided(contract.Address()) {
 			evm.StateDB.AddRefund(params.SelfdestructRefundGas)
 		}
-		log.Info("selfdestruct", "cost", gas)
 		return gas, nil
 	}
 	return gasFunc
