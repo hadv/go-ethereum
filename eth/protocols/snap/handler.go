@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -76,7 +75,7 @@ type BlockChain interface {
 // callback methods to invoke on remote deliveries.
 type Backend interface {
 	// Chain retrieves the blockchain object to serve data.
-	Chain() *core.BlockChain
+	Chain() BlockChain
 
 	// RunPeer is invoked when a peer joins on the `eth` protocol. The handler
 	// should do any peer maintenance work, handshakes and validations. If all
@@ -291,7 +290,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 
 // ServiceGetAccountRangeQuery assembles the response to an account range query.
 // It is exposed to allow external packages to test protocol behavior.
-func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePacket) ([]*AccountData, [][]byte) {
+func ServiceGetAccountRangeQuery(chain BlockChain, req *GetAccountRangePacket) ([]*AccountData, [][]byte) {
 	if req.Bytes > softResponseLimit {
 		req.Bytes = softResponseLimit
 	}
@@ -351,7 +350,7 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 	return accounts, proofs
 }
 
-func ServiceGetStorageRangesQuery(chain *core.BlockChain, req *GetStorageRangesPacket) ([][]*StorageData, [][]byte) {
+func ServiceGetStorageRangesQuery(chain BlockChain, req *GetStorageRangesPacket) ([][]*StorageData, [][]byte) {
 	if req.Bytes > softResponseLimit {
 		req.Bytes = softResponseLimit
 	}
@@ -464,7 +463,7 @@ func ServiceGetStorageRangesQuery(chain *core.BlockChain, req *GetStorageRangesP
 
 // ServiceGetByteCodesQuery assembles the response to a byte codes query.
 // It is exposed to allow external packages to test protocol behavior.
-func ServiceGetByteCodesQuery(chain *core.BlockChain, req *GetByteCodesPacket) [][]byte {
+func ServiceGetByteCodesQuery(chain BlockChain, req *GetByteCodesPacket) [][]byte {
 	if req.Bytes > softResponseLimit {
 		req.Bytes = softResponseLimit
 	}
@@ -481,7 +480,7 @@ func ServiceGetByteCodesQuery(chain *core.BlockChain, req *GetByteCodesPacket) [
 			// Peers should not request the empty code, but if they do, at
 			// least sent them back a correct response without db lookups
 			codes = append(codes, []byte{})
-		} else if blob, err := chain.ContractCodeWithPrefix(hash); err == nil {
+		} else if blob, err := chain.ContractCode(hash); err == nil {
 			codes = append(codes, blob)
 			bytes += uint64(len(blob))
 		}
@@ -494,7 +493,7 @@ func ServiceGetByteCodesQuery(chain *core.BlockChain, req *GetByteCodesPacket) [
 
 // ServiceGetTrieNodesQuery assembles the response to a trie nodes query.
 // It is exposed to allow external packages to test protocol behavior.
-func ServiceGetTrieNodesQuery(chain *core.BlockChain, req *GetTrieNodesPacket, start time.Time) ([][]byte, error) {
+func ServiceGetTrieNodesQuery(chain BlockChain, req *GetTrieNodesPacket, start time.Time) ([][]byte, error) {
 	if req.Bytes > softResponseLimit {
 		req.Bytes = softResponseLimit
 	}

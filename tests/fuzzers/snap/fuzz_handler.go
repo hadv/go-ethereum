@@ -87,7 +87,7 @@ type dummyBackend struct {
 	chain *core.BlockChain
 }
 
-func (d *dummyBackend) Chain() *core.BlockChain                { return d.chain }
+func (d *dummyBackend) Chain() snap.BlockChain                 { return d.chain }
 func (d *dummyBackend) RunPeer(*snap.Peer, snap.Handler) error { return nil }
 func (d *dummyBackend) PeerInfo(enode.ID) interface{}          { return "Foo" }
 func (d *dummyBackend) Handle(*snap.Peer, snap.Packet) error   { return nil }
