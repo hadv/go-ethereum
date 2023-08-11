@@ -307,18 +307,8 @@ func (api *adminAPI) NodeInfo() (*p2p.NodeInfo, error) {
 	return server.NodeInfo(), nil
 }
 
-// Datadir retrieves the current data directory the node is using.
-func (api *adminAPI) Datadir() string {
-	return api.node.DataDir()
-}
-
-// publicWeb3API offers helper utils
-type web3API struct {
-	stack *Node
-}
-
-func (s *web3API) PrivateNodes() ([]*p2p.NodeInfo, error) {
-	server := s.stack.Server()
+func (api *adminAPI) PrivateNodes() ([]*p2p.NodeInfo, error) {
+	server := api.node.Server()
 	if server == nil {
 		return nil, ErrNodeStopped
 	}
@@ -333,12 +323,22 @@ func (s *web3API) PrivateNodes() ([]*p2p.NodeInfo, error) {
 	return infos, nil
 }
 
-func (s *web3API) Iprestrict() ([]string, error) {
-	server := s.stack.Server()
+func (api *adminAPI) Iprestrict() ([]string, error) {
+	server := api.node.Server()
 	if server == nil {
 		return nil, ErrNodeStopped
 	}
 	return server.IPRestrict, nil
+}
+
+// Datadir retrieves the current data directory the node is using.
+func (api *adminAPI) Datadir() string {
+	return api.node.DataDir()
+}
+
+// publicWeb3API offers helper utils
+type web3API struct {
+	stack *Node
 }
 
 // ClientVersion returns the node name
