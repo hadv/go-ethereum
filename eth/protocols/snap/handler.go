@@ -64,11 +64,13 @@ type Handler func(peer *Peer) error
 type BlockChain interface {
 	// StateCache returns the caching database underpinning the blockchain instance.
 	StateCache() state.Database
-	// ContractCode retrieves a blob of data associated with a contract hash
+	// ContractCodeWithPrefix retrieves a blob of data associated with a contract hash
 	// either from ephemeral in-memory cache, or from persistent storage.
-	ContractCode(hash common.Hash) ([]byte, error)
+	ContractCodeWithPrefix(hash common.Hash) ([]byte, error)
 	// Snapshots returns the blockchain snapshot tree.
 	Snapshots() *snapshot.Tree
+	// TrieDB retrieves the low level trie database used for data storage.
+	TrieDB() *trie.Database
 }
 
 // Backend defines the data retrieval methods to serve remote requests and the
@@ -295,7 +297,7 @@ func ServiceGetAccountRangeQuery(chain BlockChain, req *GetAccountRangePacket) (
 		req.Bytes = softResponseLimit
 	}
 	// Retrieve the requested state and bail out if non existent
-	tr, err := trie.New(trie.StateTrieID(req.Root), chain.StateCache().TrieDB())
+	tr, err := trie.New(trie.StateTrieID(req.Root), chain.TrieDB())
 	if err != nil {
 		return nil, nil
 	}
@@ -333,12 +335,12 @@ func ServiceGetAccountRangeQuery(chain BlockChain, req *GetAccountRangePacket) (
 
 	// Generate the Merkle proofs for the first and last account
 	proof := light.NewNodeSet()
-	if err := tr.Prove(req.Origin[:], 0, proof); err != nil {
+	if err := tr.Prove(req.Origin[:], proof); err != nil {
 		log.Warn("Failed to prove account range", "origin", req.Origin, "err", err)
 		return nil, nil
 	}
 	if last != (common.Hash{}) {
-		if err := tr.Prove(last[:], 0, proof); err != nil {
+		if err := tr.Prove(last[:], proof); err != nil {
 			log.Warn("Failed to prove account range", "last", last, "err", err)
 			return nil, nil
 		}
@@ -425,26 +427,26 @@ func ServiceGetStorageRangesQuery(chain BlockChain, req *GetStorageRangesPacket)
 		if origin != (common.Hash{}) || (abort && len(storage) > 0) {
 			// Request started at a non-zero hash or was capped prematurely, add
 			// the endpoint Merkle proofs
-			accTrie, err := trie.NewStateTrie(trie.StateTrieID(req.Root), chain.StateCache().TrieDB())
+			accTrie, err := trie.NewStateTrie(trie.StateTrieID(req.Root), chain.TrieDB())
 			if err != nil {
 				return nil, nil
 			}
-			acc, err := accTrie.TryGetAccountByHash(account)
+			acc, err := accTrie.GetAccountByHash(account)
 			if err != nil || acc == nil {
 				return nil, nil
 			}
 			id := trie.StorageTrieID(req.Root, account, acc.Root)
-			stTrie, err := trie.NewStateTrie(id, chain.StateCache().TrieDB())
+			stTrie, err := trie.NewStateTrie(id, chain.TrieDB())
 			if err != nil {
 				return nil, nil
 			}
 			proof := light.NewNodeSet()
-			if err := stTrie.Prove(origin[:], 0, proof); err != nil {
+			if err := stTrie.Prove(origin[:], proof); err != nil {
 				log.Warn("Failed to prove storage range", "origin", req.Origin, "err", err)
 				return nil, nil
 			}
 			if last != (common.Hash{}) {
-				if err := stTrie.Prove(last[:], 0, proof); err != nil {
+				if err := stTrie.Prove(last[:], proof); err != nil {
 					log.Warn("Failed to prove storage range", "last", last, "err", err)
 					return nil, nil
 				}
@@ -480,7 +482,7 @@ func ServiceGetByteCodesQuery(chain BlockChain, req *GetByteCodesPacket) [][]byt
 			// Peers should not request the empty code, but if they do, at
 			// least sent them back a correct response without db lookups
 			codes = append(codes, []byte{})
-		} else if blob, err := chain.ContractCode(hash); err == nil {
+		} else if blob, err := chain.ContractCodeWithPrefix(hash); err == nil {
 			codes = append(codes, blob)
 			bytes += uint64(len(blob))
 		}
@@ -498,7 +500,7 @@ func ServiceGetTrieNodesQuery(chain BlockChain, req *GetTrieNodesPacket, start t
 		req.Bytes = softResponseLimit
 	}
 	// Make sure we have the state associated with the request
-	triedb := chain.StateCache().TrieDB()
+	triedb := chain.TrieDB()
 
 	accTrie, err := trie.NewStateTrie(trie.StateTrieID(req.Root), triedb)
 	if err != nil {
@@ -521,7 +523,7 @@ func ServiceGetTrieNodesQuery(chain BlockChain, req *GetTrieNodesPacket, start t
 
 		case 1:
 			// If we're only retrieving an account trie node, fetch it directly
-			blob, resolved, err := accTrie.TryGetNode(pathset[0])
+			blob, resolved, err := accTrie.GetNode(pathset[0])
 			loads += resolved // always account database reads, even for failures
 			if err != nil {
 				break
@@ -535,7 +537,7 @@ func ServiceGetTrieNodesQuery(chain BlockChain, req *GetTrieNodesPacket, start t
 			if snap == nil {
 				// We don't have the requested state snapshotted yet (or it is stale),
 				// but can look up the account via the trie instead.
-				account, err := accTrie.TryGetAccountByHash(common.BytesToHash(pathset[0]))
+				account, err := accTrie.GetAccountByHash(common.BytesToHash(pathset[0]))
 				loads += 8 // We don't know the exact cost of lookup, this is an estimate
 				if err != nil || account == nil {
 					break
@@ -556,7 +558,7 @@ func ServiceGetTrieNodesQuery(chain BlockChain, req *GetTrieNodesPacket, start t
 				break
 			}
 			for _, path := range pathset[1:] {
-				blob, resolved, err := stTrie.TryGetNode(path)
+				blob, resolved, err := stTrie.GetNode(path)
 				loads += resolved // always account database reads, even for failures
 				if err != nil {
 					break

@@ -66,7 +66,8 @@ func (result *ExecutionResult) Revert() []byte {
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028 bool) (uint64, error) {
+// func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028 bool) (uint64, error) {
+func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028 bool, isEIP3860 bool) (uint64, error) {
 	// Set the starting gas for the raw transaction
 	var gas uint64
 	if isContractCreation && isHomestead {
@@ -74,8 +75,9 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 	} else {
 		gas = params.TxGas
 	}
+	dataLen := uint64(len(data))
 	// Bump the required gas by the amount of transactional data
-	if len(data) > 0 {
+	if dataLen > 0 {
 		// Zero and non-zero bytes are priced differently
 		var nz uint64
 		for _, byt := range data {
@@ -93,11 +95,19 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 		}
 		gas += nz * nonZeroGas
 
-		z := uint64(len(data)) - nz
+		z := dataLen - nz
 		if (math.MaxUint64-gas)/params.TxDataZeroGas < z {
 			return 0, ErrGasUintOverflow
 		}
 		gas += z * params.TxDataZeroGas
+
+		if isContractCreation && isEIP3860 {
+			lenWords := toWordSize(dataLen)
+			if (math.MaxUint64-gas)/params.InitCodeWordGas < lenWords {
+				return 0, ErrGasUintOverflow
+			}
+			gas += lenWords * params.InitCodeWordGas
+		}
 	}
 	if accessList != nil {
 		gas += uint64(len(accessList)) * params.TxAccessListAddressGas
@@ -173,6 +183,53 @@ type Message interface {
 // 	}
 // }
 
+// A Message contains the data derived from a single transaction that is relevant to state
+// processing.
+// type Message struct {
+// 	To            *common.Address
+// 	From          common.Address
+// 	Nonce         uint64
+// 	Value         *big.Int
+// 	GasLimit      uint64
+// 	GasPrice      *big.Int
+// 	GasFeeCap     *big.Int
+// 	GasTipCap     *big.Int
+// 	Data          []byte
+// 	AccessList    types.AccessList
+// 	BlobGasFeeCap *big.Int
+// 	BlobHashes    []common.Hash
+
+// 	// When SkipAccountChecks is true, the message nonce is not checked against the
+// 	// account nonce in state. It also disables checking that the sender is an EOA.
+// 	// This field will be set to true for operations like RPC eth_call.
+// 	SkipAccountChecks bool
+// }
+
+// TransactionToMessage converts a transaction into a Message.
+// func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int) (*Message, error) {
+// 	msg := &Message{
+// 		Nonce:             tx.Nonce(),
+// 		GasLimit:          tx.Gas(),
+// 		GasPrice:          new(big.Int).Set(tx.GasPrice()),
+// 		GasFeeCap:         new(big.Int).Set(tx.GasFeeCap()),
+// 		GasTipCap:         new(big.Int).Set(tx.GasTipCap()),
+// 		To:                tx.To(),
+// 		Value:             tx.Value(),
+// 		Data:              tx.Data(),
+// 		AccessList:        tx.AccessList(),
+// 		SkipAccountChecks: false,
+// 		BlobHashes:        tx.BlobHashes(),
+// 		BlobGasFeeCap:     tx.BlobGasFeeCap(),
+// 	}
+// 	// If baseFee provided, set gasPrice to effectiveGasPrice.
+// 	if baseFee != nil {
+// 		msg.GasPrice = cmath.BigMin(msg.GasPrice.Add(msg.GasTipCap, baseFee), msg.GasFeeCap)
+// 	}
+// 	var err error
+// 	msg.From, err = types.Sender(s, tx)
+// 	return msg, err
+// }
+
 // ApplyMessage computes the new state by applying the given message
 // against the old state within the environment.
 //
@@ -242,13 +299,27 @@ func (st *StateTransition) to() common.Address {
 
 func (st *StateTransition) buyGas() error {
 	mgval := new(big.Int).SetUint64(st.msg.Gas())
-	mgval = mgval.Mul(mgval, st.gasPrice)
-	balanceCheck := mgval
+	mgval = mgval.Mul(mgval, st.msg.GasPrice())
+	balanceCheck := new(big.Int).Set(mgval)
 	if st.msg.GasFeeCap() != nil {
-		balanceCheck = new(big.Int).SetUint64(st.msg.Gas())
+		balanceCheck.SetUint64(st.msg.Gas())
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap())
 		balanceCheck.Add(balanceCheck, st.msg.Value())
 	}
+	// TODO: opera won't support Cancun because it's not compability
+	// So for the time being, it's not neccessary to check this
+	// if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.Time) {
+	// 	if blobGas := st.blobGasUsed(); blobGas > 0 {
+	// 		// Check that the user has enough funds to cover blobGasUsed * tx.BlobGasFeeCap
+	// 		blobBalanceCheck := new(big.Int).SetUint64(blobGas)
+	// 		blobBalanceCheck.Mul(blobBalanceCheck, st.msg.BlobGasFeeCap)
+	// 		balanceCheck.Add(balanceCheck, blobBalanceCheck)
+	// 		// Pay for blobGasUsed * actual blob fee
+	// 		blobFee := new(big.Int).SetUint64(blobGas)
+	// 		blobFee.Mul(blobFee, eip4844.CalcBlobFee(*st.evm.Context.ExcessBlobGas))
+	// 		mgval.Add(mgval, blobFee)
+	// 	}
+	// }
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 		return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 	}
@@ -305,6 +376,32 @@ func (st *StateTransition) preCheck() error {
 			}
 		}
 	}
+
+	// TODO: opera won't support Cancun because it's not compability
+	// So for the time being, it's not neccessary to check this
+	// Check the blob version validity
+	// if msg.BlobHashes != nil {
+	// 	if len(msg.BlobHashes) == 0 {
+	// 		return errors.New("blob transaction missing blob hashes")
+	// 	}
+	// 	for i, hash := range msg.BlobHashes {
+	// 		if hash[0] != params.BlobTxHashVersion {
+	// 			return fmt.Errorf("blob %d hash version mismatch (have %d, supported %d)",
+	// 				i, hash[0], params.BlobTxHashVersion)
+	// 		}
+	// 	}
+	// }
+
+	// if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.Time) {
+	// 	if st.blobGasUsed() > 0 {
+	// 		// Check that the user is paying at least the current blob fee
+	// 		blobFee := eip4844.CalcBlobFee(*st.evm.Context.ExcessBlobGas)
+	// 		if st.msg.BlobGasFeeCap.Cmp(blobFee) < 0 {
+	// 			return fmt.Errorf("%w: address %v have %v want %v", ErrBlobFeeCapTooLow, st.msg.From.Hex(), st.msg.BlobGasFeeCap, blobFee)
+	// 		}
+	// 	}
+	// }
+
 	return st.buyGas()
 }
 
@@ -334,25 +431,23 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		return nil, err
 	}
 
-	if st.evm.Config.Debug {
-		st.evm.Config.Tracer.CaptureTxStart(st.initialGas)
+	if tracer := st.evm.Config.Tracer; tracer != nil {
+		tracer.CaptureTxStart(st.initialGas)
 		defer func() {
-			st.evm.Config.Tracer.CaptureTxEnd(st.gas)
+			tracer.CaptureTxEnd(st.gas)
 		}()
 	}
 
 	var (
 		msg              = st.msg
 		sender           = vm.AccountRef(msg.From())
+		rules            = st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
 		contractCreation = msg.To() == nil
 	)
-
-	homestead := st.evm.ChainConfig().IsHomestead(st.evm.Context.BlockNumber)
-	istanbul := st.evm.ChainConfig().IsIstanbul(st.evm.Context.BlockNumber)
 	london := st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber)
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(msg.Data(), msg.AccessList(), contractCreation, homestead, istanbul)
+	gas, err := IntrinsicGas(msg.Data(), msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
 	if err != nil {
 		return nil, err
 	}
@@ -366,10 +461,15 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		return nil, fmt.Errorf("%w: address %v", ErrInsufficientFundsForTransfer, msg.From().Hex())
 	}
 
-	// Set up the initial access list.
-	if rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber); rules.IsBerlin {
-		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+	// Check whether the init code size has been exceeded.
+	if rules.IsShanghai && contractCreation && len(msg.Data()) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(msg.Data()), params.MaxInitCodeSize)
 	}
+
+	// Execute the preparatory steps for state transition which includes:
+	// - prepare accessList(post-berlin)
+	// - reset transient storage(eip 1153)
+	st.state.Prepare(rules, msg.From(), st.evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
 
 	var (
 		ret   []byte
@@ -424,3 +524,9 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gas
 }
+
+// TODO: opera don't need to support BlobHashes
+// blobGasUsed returns the amount of blob gas used by the message.
+// func (st *StateTransition) blobGasUsed() uint64 {
+// 	return uint64(len(st.msg.BlobHashes) * params.BlobTxBlobGasPerBlob)
+// }

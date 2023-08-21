@@ -21,6 +21,7 @@
 package leveldb
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -73,6 +74,8 @@ type Database struct {
 	nonlevel0CompGauge  metrics.Gauge // Gauge for tracking the number of table compaction in non0 level
 	seekCompGauge       metrics.Gauge // Gauge for tracking the number of table compaction caused by read opt
 	manualMemAllocGauge metrics.Gauge // Gauge to track the amount of memory that has been manually allocated (not a part of runtime/GC)
+
+	levelsGauge []metrics.Gauge // Gauge for tracking the number of tables in levels
 
 	quitLock sync.Mutex      // Mutex protecting the quit channel access
 	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
@@ -144,7 +147,7 @@ func NewCustom(file string, namespace string, customize func(options *opt.Option
 	ldb.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"memory/manualalloc", nil)
 
 	// Start up the metrics gathering and return
-	go ldb.meter(metricsGatheringInterval)
+	go ldb.meter(metricsGatheringInterval, namespace)
 	return ldb, nil
 }
 
@@ -263,42 +266,22 @@ func (db *Database) Path() string {
 
 // meter periodically retrieves internal leveldb counters and reports them to
 // the metrics subsystem.
-//
-// This is how a LevelDB stats table looks like (currently):
-//
-//	Compactions
-//	 Level |   Tables   |    Size(MB)   |    Time(sec)  |    Read(MB)   |   Write(MB)
-//	-------+------------+---------------+---------------+---------------+---------------
-//	   0   |          0 |       0.00000 |       1.27969 |       0.00000 |      12.31098
-//	   1   |         85 |     109.27913 |      28.09293 |     213.92493 |     214.26294
-//	   2   |        523 |    1000.37159 |       7.26059 |      66.86342 |      66.77884
-//	   3   |        570 |    1113.18458 |       0.00000 |       0.00000 |       0.00000
-//
-// This is how the write delay look like (currently):
-// DelayN:5 Delay:406.604657ms Paused: false
-//
-// This is how the iostats look like (currently):
-// Read(MB):3895.04860 Write(MB):3654.64712
-func (db *Database) meter(refresh time.Duration) {
+func (db *Database) meter(refresh time.Duration, namespace string) {
 	// Create the counters to store current and previous compaction values
 	compactions := make([][]int64, 2)
 	for i := 0; i < 2; i++ {
 		compactions[i] = make([]int64, 4)
 	}
-	// Create storage for iostats.
-	var iostats [2]uint64
 
-	// Create storage and warning log tracer for write delay.
-	var (
-		delaystats      [2]int64
-		lastWritePaused time.Time
-	)
-
+	// Create storages for states and warning log tracer.
 	var (
 		errc chan error
 		merr error
-	)
 
+		iostats         [2]int64
+		delaystats      [2]int64
+		lastWritePaused time.Time
+	)
 	timer := time.NewTimer(refresh)
 	defer timer.Stop()
 
@@ -306,6 +289,7 @@ func (db *Database) meter(refresh time.Duration) {
 	for i := 1; errc == nil && merr == nil; i++ {
 		// Retrieve the database stats
 		var stats = &leveldb.DBStats{}
+		// Stats method resets buffers inside therefore it's okay to just pass the struct.
 		err := db.db.Stats(stats)
 		if err != nil {
 			db.log.Error("Failed to read database stats", "err", err)
@@ -357,13 +341,15 @@ func (db *Database) meter(refresh time.Duration) {
 		delaystats[0], delaystats[1] = delayN, duration.Nanoseconds()
 
 		// Retrieve the database iostats.
-		nRead := stats.IORead
-		nWrite := stats.IOWrite
+		var (
+			nRead  = int64(stats.IORead)
+			nWrite = int64(stats.IOWrite)
+		)
 		if db.diskReadMeter != nil {
-			db.diskReadMeter.Mark(int64((nRead - iostats[0]) * 1024 * 1024))
+			db.diskReadMeter.Mark(nRead - iostats[0])
 		}
 		if db.diskWriteMeter != nil {
-			db.diskWriteMeter.Mark(int64((nWrite - iostats[1]) * 1024 * 1024))
+			db.diskWriteMeter.Mark(nWrite - iostats[1])
 		}
 		iostats[0], iostats[1] = nRead, nWrite
 
@@ -371,6 +357,14 @@ func (db *Database) meter(refresh time.Duration) {
 		db.level0CompGauge.Update(int64(stats.Level0Comp))
 		db.nonlevel0CompGauge.Update(int64(stats.NonLevel0Comp))
 		db.seekCompGauge.Update(int64(stats.SeekComp))
+
+		for i, tables := range stats.LevelTablesCounts {
+			// Append metrics for additional layers
+			if i >= len(db.levelsGauge) {
+				db.levelsGauge = append(db.levelsGauge, metrics.NewRegisteredGauge(namespace+fmt.Sprintf("tables/level%v", i), nil))
+			}
+			db.levelsGauge[i].Update(int64(tables))
+		}
 
 		// Sleep a bit, then repeat the stats collection
 		select {
