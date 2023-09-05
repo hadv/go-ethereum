@@ -35,7 +35,8 @@ import (
 
 const (
 	// maxDiffLayers is the maximum diff layers allowed in the layer tree.
-	maxDiffLayers = 128
+	// set to 0 for go-opera compatibility.
+	maxDiffLayers = 0
 
 	// defaultCleanSize is the default memory allowance of clean cache.
 	defaultCleanSize = 16 * 1024 * 1024
